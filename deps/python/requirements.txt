@@ -1,0 +1,7 @@
+cellpose[all]
+opencv-python-headless
+matplotlib
+fastremap
+PyQt6
+torch
+torchvision
