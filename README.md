@@ -34,7 +34,7 @@ Markdown
 
 # CellposeWrapper.jl
 
-A high-performance Julia wrapper for [Cellpose v3/v4](https://www.cellpose.org/), designed for biological image segmentation.
+A high-performance Julia wrapper for [Cellpose v4](https://www.cellpose.org/), designed for biological image segmentation.
 
 This package provides a seamless interface between Julia and Python, with specific optimizations for **Apple Silicon (M1/M2/M3)** using MPS acceleration and **NVIDIA GPUs** using CUDA.
 
