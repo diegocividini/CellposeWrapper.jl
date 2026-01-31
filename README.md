@@ -125,7 +125,7 @@ using .CellposeWrapper
 masks = CellposeWrapper.segment_image("assets/cells.jpg", diameter=nothing)
 
 # Visualize results
-CellposeWrapper.show_masks(masks, "assets/cells.jpg")
+CellposeWrapper.show_results(masks, "assets/cells.jpg")
 ```
 
 ## 2. Dense Tissue Segmentation (Advanced)
