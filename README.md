@@ -147,7 +147,7 @@ masks = CellposeWrapper.segment_image(
     cellprob_threshold=-0.5 
 )
 
-CellposeWrapper.show_masks(masks, "assets/tissue_sample.jpg")
+CellposeWrapper.show_results(masks, "assets/tissue_sample.jpg")
 ```
 
 ---
