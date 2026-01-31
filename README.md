@@ -21,7 +21,7 @@ Follow these steps to set up the environment from scratch.
 Open your terminal and clone the folder:
 
 ```bash
-git clone [https://github.com/diegocividini/CellposeWrapper.jl.git](https://github.com/diegocividini/CellposeWrapper.jl.git)
+git clone https://github.com/diegocividini/CellposeWrapper.jl.git
 cd CellposeWrapper.jl
 ```
 Ecco il contenuto completo per il file README.md.
@@ -52,7 +52,7 @@ Follow these steps to set up the environment from scratch.
 
 ### 1. Clone the Repository
 ```bash
-git clone [https://github.com/IL_TUO_USERNAME/CellposeWrapper.jl.git](https://github.com/IL_TUO_USERNAME/CellposeWrapper.jl.git)
+git clone https://github.com/IL_TUO_USERNAME/CellposeWrapper.jl.git
 cd CellposeWrapper.jl
 ```
 ### 2. Python Environment Setup
