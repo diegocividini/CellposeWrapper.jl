@@ -1,7 +1,11 @@
-cellpose[all]
-opencv-python-headless
-matplotlib
+# Core
+cellpose
 fastremap
-PyQt6
 torch
 torchvision
+
+# I/O immagini (OpenCV senza GUI)
+opencv-python-headless
+
+# opzionale (solo se ti serve davvero in wrapper o debug)
+matplotlib
