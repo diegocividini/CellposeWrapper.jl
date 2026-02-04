@@ -1,10 +1,8 @@
 module CellposeWrapper
 
 using PyCall
-using Images
-using Plots
 using Colors
-using FileIO
+using Plots
 
 # --- GLOBALS ---
 const cv2 = PyNULL()
@@ -28,10 +26,43 @@ end
 
 # --- helpers ---
 _safe_array(x) = isa(x, PyObject) ? Array(x) : x
+_is_py_none(x) = (x isa PyObject) && (py"lambda o: o is None"(x) == true)
 
 # normalizza input per chiavi cache stabili
-_norm_model_type(x) = (x === nothing || x == "") ? "cyto" : String(x)
+_norm_model_type(x) = (x === nothing || x == "") ? "cpsam" : String(x)
 _norm_pretrained(x) = (x === nothing) ? "" : String(x)
+
+# Converte un array HxWx3 UInt8/Float in Matrix{RGB{Float64}}
+function _cv_rgb_to_rgbmat(img_rgb)
+    a = _safe_array(img_rgb)  # tipicamente HxWx3 UInt8
+    ndims(a) == 3 || error("Expected HxWxC array from cv2, got ndims=$(ndims(a)) size=$(size(a))")
+    size(a, 3) == 3 || error("Expected 3 channels RGB, got C=$(size(a,3))")
+
+    # a[i,j,1]=R a[i,j,2]=G a[i,j,3]=B (UInt8 0..255)
+    if eltype(a) <: UInt8
+        return [RGB{Float64}(a[i, j, 1] / 255, a[i, j, 2] / 255, a[i, j, 3] / 255) for i in 1:size(a, 1), j in 1:size(a, 2)]
+    else
+        # se è già float, assumiamo 0..1 oppure 0..255? qui assumo 0..1; se vedi immagini “scure”, cambia.
+        return [RGB{Float64}(a[i, j, 1], a[i, j, 2], a[i, j, 3]) for i in 1:size(a, 1), j in 1:size(a, 2)]
+    end
+end
+
+function _load_image_rgbmat_cv2(image_path::String)
+    _init_py!()
+    lock(_py_lock)
+    try
+        img_cv = cv2.imread(image_path)
+        if _is_py_none(img_cv)
+            error("Not Found or unreadable image: $image_path")
+        end
+        img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+        return _cv_rgb_to_rgbmat(img_rgb)
+    finally
+        unlock(_py_lock)
+    end
+end
+
+
 
 """
     clear_model_cache!()
@@ -55,13 +86,16 @@ function _init_py!()
     try
         _initialized[] && return  # double-check
 
-        println("🔍 CellposeWrapper: Init Python (Lazy Mode)...")
+        @info "CellposeWrapper: Init Python (Lazy Mode)..."
 
-        # torch import una sola volta
         torch_temp = pyimport("torch")
-        if torch_temp.backends.mps.is_available()
-            println("🚀 CellposeWrapper: Mac Apple Silicon (MPS) active.")
-            torch_temp.set_default_dtype(torch_temp.float32)
+        try
+            if hasproperty(torch_temp.backends, "mps") && torch_temp.backends.mps.is_available()
+                @info "CellposeWrapper: Mac Apple Silicon (MPS) active."
+                torch_temp.set_default_dtype(torch_temp.float32)
+            end
+        catch
+            # ignora, torch su alcune piattaforme non ha mps
         end
 
         py"""
@@ -71,22 +105,18 @@ function _init_py!()
         from cellpose import models
 
         def _load_simple(gpu_on, model_type_str, custom_path):
-            # robust default
             if model_type_str is None or model_type_str == "":
-                model_type_str = "cyto"
+                model_type_str = "cpsam"
 
             if custom_path:
-                print(f"   --> Python: Using custom path: {custom_path}")
                 weights_path = custom_path
             else:
-                print(f"   --> Python: Requested '{model_type_str}'")
                 try:
                     weights_path = models.model_path(model_type_str)
-                except Exception as e:
-                    print(f"   ⚠️ Warning path: {e}")
+                except Exception:
+                    # fallback: assume sia un path o un identificatore valido
                     weights_path = model_type_str
 
-            print(f"   --> Python: Loading from: {os.path.basename(str(weights_path))}")
             return models.CellposeModel(gpu=gpu_on, pretrained_model=weights_path)
         """
 
@@ -95,14 +125,16 @@ function _init_py!()
         copy!(py_model_loader, py"_load_simple")
 
         _initialized[] = true
-        println("✅ Python API configured.")
+        @info "CellposeWrapper: Python API configured."
     catch e
-        println("❌ CRITICAL INIT ERROR")
-        rethrow(e)
+        _initialized[] = false
+        @error "CellposeWrapper: CRITICAL INIT ERROR" exception = (e, catch_backtrace())
+        rethrow()
     finally
         unlock(_py_lock)
     end
 end
+
 
 """
     _get_model(use_gpu, model_type, pretrained_model; cache_models=true, max_cached_models=2)
@@ -171,12 +203,22 @@ function segment_image(image_path::String;
     lock(_py_lock)
     try
         img_cv = cv2.imread(image_path)
-        if img_cv === nothing
-            error("Not Found: $image_path")
+        if _is_py_none(img_cv)
+            error("Not Found or unreadable image: $image_path")
         end
+
         img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
 
-        use_gpu = torch.cuda.is_available() || torch.backends.mps.is_available()
+        use_gpu = false
+        try
+            use_gpu = torch.cuda.is_available()
+        catch
+        end
+        try
+            # mps può non esistere su non-mac
+            use_gpu = use_gpu || (hasproperty(torch.backends, "mps") && torch.backends.mps.is_available())
+        catch
+        end
 
         # chiavi cache stabili
         mt = _norm_model_type(model_type)
@@ -184,12 +226,28 @@ function segment_image(image_path::String;
 
         model = _get_model(use_gpu, mt, pm; cache_models=cache_models, max_cached_models=max_cached_models)
 
-        println("...Analyzing...")
+        @info "CellposeWrapper: Analyzing..."
+
+        params = Dict(
+            :image_path => image_path,
+            :diameter => diameter,
+            :model_type => mt,
+            :pretrained_model => pm,
+            :flow_threshold => flow_threshold,
+            :cellprob_threshold => cellprob_threshold,
+            :augment => augment,
+            :invert => invert,
+            :min_size => min_size,
+            :return_flows => return_flows,
+            :cache_models => cache_models,
+            :max_cached_models => max_cached_models,
+            :use_gpu => use_gpu
+        )
+        @info "CellposeWrapper params" params = params
 
         results = model.eval(
             img_rgb,
             diameter=diameter,
-            channels=[0, 0],
             flow_threshold=flow_threshold,
             cellprob_threshold=cellprob_threshold,
             augment=augment,
@@ -197,16 +255,17 @@ function segment_image(image_path::String;
             min_size=min_size
         )
 
+
         masks = _safe_array(results[1])
 
         if !return_flows
             est_diam = (length(results) >= 4) ? results[4] : 0.0
             if est_diam isa Real && est_diam > 0
-                println("✅ Done! Diameter: $(round(Float64(est_diam), digits=2)) px")
+                @info "CellposeWrapper: Done! Diameter: $(round(Float64(est_diam), digits=2)) px"
             else
-                println("✅ Done!")
+                @info "CellposeWrapper: Done!"
             end
-            return (masks=masks,)
+            return (masks=masks, params=params)
         end
 
         flows = results[2]
@@ -215,12 +274,12 @@ function segment_image(image_path::String;
 
         est_diam = (length(results) >= 4) ? results[4] : 0.0
         if est_diam isa Real && est_diam > 0
-            println("✅ Done! Diameter: $(round(Float64(est_diam), digits=2)) px")
+            @info "CellposeWrapper: Done! Diameter: $(round(Float64(est_diam), digits=2)) px"
         else
-            println("✅ Done!")
+            @info "CellposeWrapper: Done!"
         end
 
-        return (masks=masks, flows_rgb=flows_rgb, cellprob=cellprob)
+        return (masks=masks, flows_rgb=flows_rgb, cellprob=cellprob, params=params)
     finally
         unlock(_py_lock)
     end
@@ -232,66 +291,44 @@ end
 view ∈ {"masks","flows","prob","image"}
 """
 function show_results(results, image_path; view="masks")
-    # show_results è 100% Julia: NON serve lock Python.
-    img = load(image_path)
-    n_cells = maximum(results.masks)
+    img = _load_image_rgbmat_cv2(image_path)
+    n_cells = isempty(results.masks) ? 0 : maximum(results.masks)
 
     if view == "masks"
         masks = results.masks
         h, w = size(masks)
-        println("Visualization: $n_cells cells.")
+        @info "Visualization: $n_cells cells."
 
         overlay = fill(RGBA(0, 0, 0, 0), h, w)
         if n_cells > 0
-            colors = distinguishable_colors(n_cells + 2, [RGB(0, 0, 0), RGB(1, 1, 1)])
-            base_cols = colors[3:end]
+            cols = distinguishable_colors(n_cells + 2, [RGB(0, 0, 0), RGB(1, 1, 1)])[3:end]
             @inbounds for i in 1:h, j in 1:w
                 id = masks[i, j]
                 if id > 0
-                    c_idx = ((id - 1) % length(base_cols)) + 1
-                    c = base_cols[c_idx]
-                    overlay[i, j] = RGBA(c.r, c.g, c.b, 0.4)
+                    c = cols[((id-1)%length(cols))+1]
+                    overlay[i, j] = RGBA(c.r, c.g, c.b, 0.7)
                 end
             end
         end
+
         p = plot(img, axis=false, title="Segmentation $n_cells cells")
         plot!(p, overlay, axis=false)
         display(p)
 
-    elseif view == "flows"
-        println("Visualization Flows of $n_cells cells")
-        flow_data = results.flows_rgb
-
-        if ndims(flow_data) == 3
-            if size(flow_data, 3) == 3
-                if eltype(flow_data) <: UInt8
-                    flow_img = colorview(RGB, permutedims(Float64.(flow_data) ./ 255.0, (3, 1, 2)))
-                else
-                    flow_img = colorview(RGB, permutedims(Float64.(flow_data), (3, 1, 2)))
-                end
-            elseif size(flow_data, 1) == 3
-                if eltype(flow_data) <: UInt8
-                    flow_img = colorview(RGB, Float64.(flow_data) ./ 255.0)
-                else
-                    flow_img = colorview(RGB, Float64.(flow_data))
-                end
-            else
-                println("⚠️ Unrecognized flows format: $(size(flow_data))")
-                return
-            end
-            display(plot(flow_img, axis=false, title="Flows $n_cells cells"))
-        else
-            println("⚠️ Flows have unexpected dims: $(ndims(flow_data))")
-        end
-
     elseif view == "prob"
-        println("Visualization Prob $n_cells cells")
+        @info "Visualization Prob $n_cells cells"
         prob_map = results.cellprob
-        display(heatmap(prob_map, axis=false, yflip=true, aspect_ratio=:equal, title="Probability $n_cells cells"))
+        display(heatmap(prob_map, axis=false, yflip=true, aspect_ratio=:equal,
+            title="Probability $n_cells cells"))
 
     elseif view == "image"
         display(plot(img, axis=false))
+
+    else
+        @warn "Unknown view='$view'. Use 'masks', 'prob', or 'image'."
     end
 end
 
+
+export segment_image, show_results, clear_model_cache!
 end # module
