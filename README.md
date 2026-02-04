@@ -1,155 +1,180 @@
 # CellposeWrapper.jl
 
-A robust Julia wrapper for [Cellpose v4](https://www.cellpose.org/), designed for high-performance biological image segmentation.
+A lightweight and robust Julia wrapper for **Cellpose v4**, designed for biological image segmentation with optional visualization utilities.
 
-This wrapper provides a seamless interface between Julia and Python, with specific optimizations for **Apple Silicon** using MPS acceleration and **NVIDIA GPUs** using CUDA.
+This package provides a clean Julia API on top of the Python Cellpose backend, with **lazy initialization**, **automatic GPU detection**, and a **modular design** suitable for CI and production workflows.
+
+---
 
 ## 🚀 Features
 
-- **Universal Hardware Support:** Automatically detects and uses `MPS` (Mac) or `CUDA` (Linux/Windows).
-- **Cellpose v4 Compatibility:** Handles the new API structure automatically.
-- **Advanced Parameter Control:** Full access to `flow_threshold`, `cellprob_threshold`, `augment`, and more directly from Julia.
+- **Cellpose v4 compatible**
+  - Uses the new `CellposeModel` API
+  - Supports **`cpsam`** (the only model type supported in v4)
+- **Automatic hardware detection**
+  - Apple Silicon (MPS)
+  - NVIDIA GPUs (CUDA)
+  - CPU fallback
+- **Lazy Python initialization**
+  - Python, Torch and Cellpose are loaded only when needed
+- **Pure segmentation core**
+  - No plotting or image dependencies required
+- **Optional visualization via Julia extensions**
+  - Visualization utilities are loaded only if plotting packages are installed
+- **CI-safe**
+  - Tests pass even when Python / Cellpose are not installed
 
 ---
 
 ## 🛠 Installation
 
-Follow these steps to set up the environment from scratch.
+### Julia package
 
-### 1. Clone the Repository
-
-Open your terminal and clone the folder:
-
-```bash
-git clone https://github.com/diegocividini/CellposeWrapper.jl.git
-cd CellposeWrapper.jl
+```julia
+using Pkg
+Pkg.add("CellposeWrapper")   # once registered
 ```
-Ecco il contenuto completo per il file README.md.
 
-Ho strutturato il documento in modo professionale, includendo tutte le istruzioni per l'installazione dell'ambiente Python, il collegamento con Julia, il download manuale dei modelli (necessario per il fix che abbiamo fatto) e gli esempi di utilizzo ottimizzati.
+For local development:
 
-Copia tutto il blocco sottostante e incollalo nel file README.md nella root del tuo progetto.
-
-Markdown
-
-# CellposeWrapper.jl
-
-A high-performance Julia wrapper for [Cellpose v4](https://www.cellpose.org/), designed for biological image segmentation.
-
-This package provides a seamless interface between Julia and Python, with specific optimizations for **Apple Silicon (M1/M2/M3)** using MPS acceleration and **NVIDIA GPUs** using CUDA.
-
-## 🚀 Key Features
-- **Universal Hardware Support:** Automatically detects and uses `MPS` (Mac), `CUDA` (Linux/Windows), or CPU.
-- **Cellpose v4 Compatibility:** Handles the new Python API structure automatically.
-- **Tissuenet Legacy Support:** Includes logic to use the highly accurate legacy Tissuenet (TN2) weights instead of the newer (but sometimes less precise) `cpsam` models.
-- **Advanced Parameter Control:** Full access to `flow_threshold`, `cellprob_threshold`, `augment`, `min_size` and `invert` directly from Julia.
-
----
-
-## 🛠 Installation Guide
-
-Follow these steps to set up the environment from scratch.
-
-### 1. Clone the Repository
-```bash
-git clone https://github.com/diegocividini/CellposeWrapper.jl.git
-cd CellposeWrapper.jl
+```julia
+Pkg.develop(path="path/to/CellposeWrapper.jl")
 ```
-### 2. Python Environment Setup
-You need to create a local Python environment to handle Cellpose dependencies without conflicting with your system.
 
-Recommended: `Python 3.10`.
+### 🐍 Python environment (required for segmentation)
 
-#### Using `venv` (built-in Python tool)
+Cellpose runs in Python.
+You must provide a Python environment with:
+
+`cellpose >= 4`
+
+`torch`
+
+`opencv-python`
+
+Recommended: **Python 3.10**
+
+Example using `venv`
 
 ```bash
-# 1. Navigate to the python dependencies folder
 cd deps/python
-
-# 2. Create a virtual environment named .venv
-# (If using pyenv, ensure local python is set to 3.10 first)
 python3 -m venv .venv
-
-# 3. Activate the environment
-# Mac/Linux:
 source .venv/bin/activate
-# Windows:
-# .venv\Scripts\activate
 
-# 4. Install required packages
-pip install -r requirements.txt
-
-# 5. Return to the project root
-cd ../..
+pip install cellpose torch opencv-python
 ```
 
-### 3. Julia Environment Setup
-
-Now you need to tell Julia to use the specific Python environment you just created.
-
-Launch Julia in the project root (`julia`) and run:
+Then tell Julia to use this Python:
 
 ```julia
-import Pkg
-Pkg.activate(".")
-
-# 1. Install Julia dependencies defined in Project.toml
-Pkg.instantiate()
-
-# 2. Link Julia to your local Python .venv (Crucial Step!)
-# This ensures Julia uses the correct libraries (Torch, Cellpose, etc.)
+using Pkg
 ENV["PYTHON"] = joinpath(pwd(), "deps", "python", ".venv", "bin", "python")
-
-# 3. Build PyCall to lock this configuration
 Pkg.build("PyCall")
-
-# 4. Exit to apply changes
-exit()
 ```
+
+Restart Julia after building PyCall.
 
 ---
 
-# ⚡️ Usage Examples
+## ⚡️ Usage
 
-## 1. Basic Segmentation (Sparse Cells)
-Use the default cyto3 model for standard cell cultures or sparse nuclei.
+### Basic segmentation
 
 ```julia
+using CellposeWrapper
 
-# Load the module (for local development)
-include("src/CellposeWrapper.jl")
-using .CellposeWrapper
+res = segment_image("cells.png"; diameter=nothing)
 
-# Run segmentation
-# diameter=nothing lets Cellpose estimate cell size automatically
-masks = CellposeWrapper.segment_image("assets/cells.jpg", diameter=nothing)
-
-# Visualize results
-CellposeWrapper.show_results(masks, "assets/cells.jpg")
+masks = res.masks
 ```
 
-## 2. Dense Tissue Segmentation (Advanced)
-For histology images where cells touch each other (no gaps), use the tissuenet model with specific tuning.
+Cellpose automatically:
+
+- detects available hardware (CUDA / MPS / CPU)
+- estimates the cell diameter if diameter = nothing
+- uses the cpsam model
+
+> ℹ️ If `model_type` is set to anything other than "cpsam", a warning is logged because Cellpose v4 currently supports only `cpsam`.
+
+> 💡 `init!()` can be called explicitly to warm up Python and load models ahead of time, but is not required.
+
+### Advanced parameters
 
 ```julia
-
-include("src/CellposeWrapper.jl")
-using .CellposeWrapper
-
-masks = CellposeWrapper.segment_image(
-    "assets/tissue_sample.jpg",
-    diameter=25,       
-    # Filter out noise/artifacts smaller than 100px
-    min_size=100,           
-    # High Precision Mode (4x slower, runs 4 rotations/flips)
+res = segment_image(
+    "tissue.png";
+    diameter=25,
+    min_size=100,
     augment=true,
-    # Increase sensitivity (lower threshold = more cells detected)
-    cellprob_threshold=-0.5 
+    cellprob_threshold=-0.5
 )
-
-CellposeWrapper.show_results(masks, "assets/tissue_sample.jpg")
 ```
 
 ---
 
-A big thanks goes to [Josselin Morvan](https://github.com/sardinecan) who created the [version of this wrapper using SegmentAnything.jl](https://github.com/sardinecan/SegmentAnything.jl?tab=readme-ov-file). I used it as a reference to build this more specialized Cellpose wrapper.
+## 🎨 Visualization (optional)
+
+Visualization utilities are **not loaded by default**.
+
+To enable them, load the required packages:
+
+```julia
+using Plots, Colors, FileIO, Images
+```
+
+This automatically activates the extension `CellposeWrapperVizExt`.
+
+### Show results
+
+```julia
+CellposeWrapper.show_results(res, "cells.png"; view="masks")
+```
+
+Available views:
+
+- `"masks"` – colored instance segmentation overlay
+- `"flows"` – Cellpose flow visualization (requires `return_flows=true`)
+- `"prob"` – cell probability map (requires `return_flows=true`)
+- `"image"` – original image only
+
+`show_results` displays plots and returns `nothing`.
+
+#### Flows / Probability maps
+
+```julia
+res = segment_image("cells.png"; return_flows=true)
+CellposeWrapper.show_results(res, "cells.png"; view="flows")
+CellposeWrapper.show_results(res, "cells.png"; view="prob")
+```
+
+---
+
+## 🧪 Testing & CI
+
+The test suite is designed to be **CI-safe**:
+
+Core tests do **not** require Python
+
+Visualization tests run only if plotting dependencies are installed
+
+Runtime Cellpose tests run **only if Python + Cellpose are available**
+
+Run tests locally:
+
+```julia
+Pkg.activate(".")
+Pkg.test()
+```
+
+---
+
+## 📎 Design philosophy
+
+- Segmentation-first API
+- Visualization is optional and modular
+- No hard dependency on plotting or image IO
+- Safe for Julia General Registry and automated CI
+
+## 🙏 Acknowledgements
+
+Inspired by Julia wrappers such as [SegmentAnything.jl](https://github.com/sardinecan/SegmentAnything.jl) and by the original [Cellpose](https://github.com/MouseLand/cellpose) project.
