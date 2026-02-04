@@ -122,8 +122,8 @@ end
 `view ∈ {"masks","flows","prob","image"}`
 
 - "masks": overlay colored instance masks on the input image
-- "flows": show Cellpose flow visualization (requires `return_flows=true`)
-- "prob": show Cellpose cell probability map (requires `return_flows=true`)
+- "flows": show Cellpose flow visualization
+- "prob": show Cellpose cell probability map
 - "image": show only the input image
 """
 function CellposeWrapper.show_results(results, image_path::AbstractString; view::AbstractString="masks")
@@ -156,7 +156,7 @@ function CellposeWrapper.show_results(results, image_path::AbstractString; view:
   elseif view == "flows"
     @info "Visualization Flows of $n_cells cells"
     if !hasproperty(results, :flows_rgb)
-      @warn "results.flows_rgb not found. Call segment_image(...; return_flows=true)."
+      @warn "results.flows_rgb not found. Re-run segment_image(...; return_flows=true) to compute flows."
       return nothing
     end
     flow_rgb = _flows_to_rgb(getproperty(results, :flows_rgb))
@@ -166,7 +166,7 @@ function CellposeWrapper.show_results(results, image_path::AbstractString; view:
   elseif view == "prob"
     @info "Visualization Prob $n_cells cells"
     if !hasproperty(results, :cellprob)
-      @warn "results.cellprob not found. Call segment_image(...; return_flows=true)."
+      @warn "results.cellprob not found. Re-run segment_image(...; return_flows=true) to compute probability map."
       return nothing
     end
     prob_map = getproperty(results, :cellprob)
