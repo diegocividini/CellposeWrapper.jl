@@ -175,6 +175,10 @@ Pkg.test()
 - No hard dependency on plotting or image IO
 - Safe for Julia General Registry and automated CI
 
+> CellposeWrapper automatically uses CUDA when available via PyTorch.
+> CUDA support depends on the presence of NVIDIA proprietary drivers and a CUDA-enabled PyTorch installation.
+> If CUDA is not available, the wrapper falls back to CPU or Apple MPS automatically.
+
 ## 🙏 Acknowledgements
 
 Inspired by Julia wrappers such as [SegmentAnything.jl](https://github.com/sardinecan/SegmentAnything.jl) and by the original [Cellpose](https://github.com/MouseLand/cellpose) project.
