@@ -25,7 +25,27 @@ end
 
 # --- helpers ---
 _safe_array(x) = isa(x, PyObject) ? Array(x) : x
-_is_py_none(x) = (x isa PyObject) && py_isnone(x)
+
+# NB: su alcune piattaforme PyNULL chiamato come funzione può esplodere.
+# Qui mettiamo un guard robusto: se py_isnone non è stato ancora bindato, fallback su PyCall.ispyNone
+function _is_py_none(x)
+    if !(x isa PyObject)
+        return false
+    end
+    try
+        # se la funzione python _isnone è già stata copiata in py_isnone, usala
+        if !PyCall.isnull(py_isnone)
+            return py_isnone(x)
+        end
+    catch
+    end
+    # fallback generale (robusto)
+    try
+        return PyCall.ispyNone(x)
+    catch
+        return false
+    end
+end
 
 # normalizza input per chiavi cache stabili
 _norm_model_type(x) = (x === nothing || x == "") ? "cpsam" : String(x)
@@ -46,6 +66,107 @@ function clear_model_cache!()
     return nothing
 end
 
+# ------------------------------------------------------------
+# Python env helpers (venv/conda sys.path fix) - robust on Windows
+# ------------------------------------------------------------
+
+# Determina la root della venv a partire dall'eseguibile python usato da PyCall.
+# - Windows venv:  <venv>\Scripts\python.exe
+# - Posix venv:    <venv>/bin/python
+function _venv_root_from_python(pyexe::AbstractString)
+    d = abspath(dirname(String(pyexe)))
+    base = lowercase(basename(d))
+    if base == "scripts" || base == "bin"
+        return abspath(joinpath(d, ".."))
+    end
+    # fallback non standard
+    return abspath(joinpath(d, ".."))
+end
+
+function _candidate_sitepackages_paths(pyexe::AbstractString)
+    root = _venv_root_from_python(pyexe)
+
+    # Windows venv layout
+    win_sp = joinpath(root, "Lib", "site-packages")
+
+    # Posix venv layout: <venv>/lib/pythonX.Y/site-packages
+    sys = pyimport("sys")
+    v = sys.version_info  # <-- su PyCall spesso diventa Tuple Julia
+
+    # ✅ NON usare v.major / v.minor
+    major = Int(v[1])
+    minor = Int(v[2])
+
+    posix_sp_1 = joinpath(root, "lib", "python$(major).$(minor)", "site-packages")
+    posix_sp_2 = joinpath(root, "lib64", "python$(major).$(minor)", "site-packages")
+
+    return (win_sp, posix_sp_1, posix_sp_2)
+end
+
+
+# Inietta site-packages della venv se non è già in sys.path.
+# Questo è il fix fondamentale per Windows (PyCall può lanciare python con sys.path "di sistema").
+function _inject_sitepackages_if_missing!()
+    sys  = pyimport("sys")
+    site = pyimport("site")
+
+    pyexe = PyCall.python
+    cand = _candidate_sitepackages_paths(pyexe)
+
+    current_paths = Set(String.(sys.path))
+    sp_added = false
+
+    for sp in cand
+        if isdir(sp) && !(sp in current_paths)
+            try
+                site.addsitedir(sp)
+                sp_added = true
+            catch
+                # ignora e continua
+            end
+        end
+    end
+
+    return sp_added
+end
+
+# Su Windows: in certi setup torch ha DLL in torch\lib e serve aggiungere la directory
+function _add_torch_dll_dir_if_present!()
+    if Sys.iswindows()
+        os = pyimport("os")
+        pyexe = PyCall.python
+        root = _venv_root_from_python(pyexe)
+        torchlib = joinpath(root, "Lib", "site-packages", "torch", "lib")
+        if isdir(torchlib)
+            try
+                os.add_dll_directory(torchlib)
+            catch
+            end
+        end
+    end
+    return nothing
+end
+
+# Sanity check (non invasivo): se PyCall usa la venv ma sys.path non contiene i suoi site-packages,
+# proviamo ad aggiungerli. Questo riduce i casi in cui torch importa ma altri moduli falliscono.
+function _ensure_venv_sitepackages_present!()
+    try
+        sys = pyimport("sys")
+        pyexe = PyCall.python
+        cand = _candidate_sitepackages_paths(pyexe)
+        current_paths = Set(String.(sys.path))
+        for sp in cand
+            if isdir(sp) && !(sp in current_paths)
+                _inject_sitepackages_if_missing!()
+                break
+            end
+        end
+    catch
+        # se sys/site non sono importabili, lasciamo stare
+    end
+    return nothing
+end
+
 function _init_py!()
     _initialized[] && return
 
@@ -55,14 +176,27 @@ function _init_py!()
 
         @info "CellposeWrapper: Init Python (Lazy Mode)..."
 
-        torch_temp = pyimport("torch")
+        # 1) prova import torch "diretto"
+        torch_temp = nothing
+        try
+            torch_temp = pyimport("torch")
+            # anche se va, assicuriamoci che sys.path includa i site-packages della venv
+            _ensure_venv_sitepackages_present!()
+        catch
+            # 2) fallback Windows/venv: aggiungi site-packages + dll dir e riprova
+            _inject_sitepackages_if_missing!()
+            _add_torch_dll_dir_if_present!()
+            torch_temp = pyimport("torch")  # retry: ora deve funzionare
+        end
+
+        # MPS (macOS Apple Silicon) - manteniamo il comportamento che già avevi
         try
             if hasproperty(torch_temp.backends, "mps") && torch_temp.backends.mps.is_available()
                 @info "CellposeWrapper: Mac Apple Silicon (MPS) active."
                 torch_temp.set_default_dtype(torch_temp.float32)
             end
         catch
-            # ignora, torch su alcune piattaforme non ha mps
+            # ignora
         end
 
         py"""
@@ -73,7 +207,6 @@ function _init_py!()
 
         def _isnone(o):
             return o is None
-
 
         def _load_simple(gpu_on, model_type_str, custom_path):
             if model_type_str is None or model_type_str == "":
@@ -110,7 +243,7 @@ end
 """
     init!()
 
-    Lazy initialization for backend Python (torch/cv2/cellpose). Useful for warmup.
+Lazy initialization for backend Python (torch/cv2/cellpose). Useful for warmup.
 """
 init!() = _init_py!()
 
@@ -193,7 +326,6 @@ function segment_image(image_path::AbstractString;
         catch
         end
         try
-            # mps può non esistere su non-mac
             use_gpu = use_gpu || (hasproperty(torch.backends, "mps") && torch.backends.mps.is_available())
         catch
         end
@@ -241,7 +373,6 @@ function segment_image(image_path::AbstractString;
             min_size=min_size
         )
 
-
         masks = _safe_array(results[1])
 
         if !return_flows
@@ -279,6 +410,6 @@ Requires the user to have installed Plots/Colors (weak deps).
 """
 function show_results end
 
-
 export init!, segment_image, show_results, clear_model_cache!
+
 end # module
