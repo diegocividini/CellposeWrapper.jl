@@ -10,13 +10,37 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         julia-version: ['1.10', '1.11']
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.julia-version }}
+
+      # Cache SOLO su ubuntu e windows
       - uses: julia-actions/cache@v2
+        if: runner.os != 'macOS'
+
+      # 🔥 FIX macOS Conda corruption
+      - name: Clean Conda (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          rm -rf ~/.julia/conda
+
+      - name: Build PyCall cleanly (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          julia --project -e '
+            using Pkg
+            ENV["PYTHON"] = ""
+            Pkg.instantiate()
+            Pkg.build("Conda")
+            Pkg.build("PyCall")
+          '
+
       - name: Run tests
-        run: julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+        run: |
+          julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
