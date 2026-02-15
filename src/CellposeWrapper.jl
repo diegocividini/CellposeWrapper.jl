@@ -168,6 +168,11 @@ function _ensure_venv_sitepackages_present!()
 end
 
 function _init_py!()
+    if get(ENV, "CI", "false") == "true"
+        @info "CellposeWrapper: CI mode – skipping Python initialization."
+        _initialized[] = true
+        return
+    end
     _initialized[] && return
 
     lock(_py_lock)
