@@ -16,31 +16,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # PRO: Python di sistema + cache pip
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            deps/python/requirements.txt
+            requirements.txt
+
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.julia-version }}
 
-      # Cache SOLO su ubuntu e windows
       - uses: julia-actions/cache@v2
-        if: runner.os != 'macOS'
 
-      # 🔥 FIX macOS Conda corruption
-      - name: Clean Conda (macOS)
-        if: runner.os == 'macOS'
+      # PRO: install minimale per far funzionare PyCall in modo deterministico
+      - name: Install minimal Python deps
         run: |
-          rm -rf ~/.julia/conda
+          python -m pip install --upgrade pip
+          pip install numpy
 
-      - name: Build PyCall cleanly (macOS)
-        if: runner.os == 'macOS'
+      # Lega PyCall alla python appena installata e testa
+      - name: Instantiate, bind PyCall to system Python, test
+        shell: bash
         run: |
           julia --project -e '
             using Pkg
-            ENV["PYTHON"] = ""
+            ENV["PYTHON"] = Sys.which("python")
             Pkg.instantiate()
-            Pkg.build("Conda")
             Pkg.build("PyCall")
+            Pkg.test()
           '
-
-      - name: Run tests
-        run: |
-          julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
