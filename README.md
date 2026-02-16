@@ -1,5 +1,10 @@
 # CellposeWrapper.jl
 
+[![CI](https://github.com/diegocividini/CellposeWrapper.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/diegocividini/CellposeWrapper.jl/actions)
+![Julia](https://img.shields.io/badge/julia-1.10%20%7C%201.11-blueviolet)
+![OS](https://img.shields.io/badge/os-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A lightweight and robust Julia wrapper for **Cellpose v4**, designed for biological image segmentation with optional visualization utilities.
 
 This package provides a clean Julia API on top of the Python Cellpose backend, with **lazy initialization**, **automatic GPU detection**, and a **modular design** suitable for CI and production workflows.
