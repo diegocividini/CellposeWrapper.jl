@@ -37,7 +37,7 @@ This package provides a clean Julia API on top of the Python Cellpose backend, w
 
 ```julia
 using Pkg
-Pkg.add("CellposeWrapper")   # once registered
+Pkg.add("CellposeWrapper")
 ```
 
 For local development:
@@ -73,7 +73,12 @@ Then tell Julia to use this Python:
 
 ```julia
 using Pkg
+
+# If you are using UNIX-like OS, the path is:
 ENV["PYTHON"] = joinpath(pwd(), "deps", "python", ".venv", "bin", "python")
+# If you are on Windows, the path is:
+ENV["PYTHON"] = joinpath(pwd(), "deps", "python", ".venv", "Scripts", "python.exe")
+
 Pkg.build("PyCall")
 ```
 
@@ -86,6 +91,10 @@ Restart Julia after building PyCall.
 ### Basic segmentation
 
 ```julia
+using Pkg 
+Pkg.activate(".") # if you are not already in the package environment Pkg.activate("Path/To/CellposeWrapper.jl")
+Pkg.instantiate()
+
 using CellposeWrapper
 
 res = segment_image("cells.png"; diameter=nothing)
@@ -121,6 +130,8 @@ res = segment_image(
 
 Visualization utilities are **not loaded by default**.
 
+> In order to visualize the results, you have to activate the environment and produce the segmentation results first, as shown in the previous section.
+
 To enable them, load the required packages:
 
 ```julia
@@ -148,6 +159,7 @@ Available views:
 
 ```julia
 res = segment_image("cells.png"; return_flows=true)
+
 CellposeWrapper.show_results(res, "cells.png"; view="flows")
 CellposeWrapper.show_results(res, "cells.png"; view="prob")
 ```
