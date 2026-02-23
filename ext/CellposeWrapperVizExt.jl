@@ -73,10 +73,15 @@ function _load_image_rgbmat(image_path::AbstractString)
   try
     img_cv = CellposeWrapper.cv2.imread(String(image_path))
     if _is_py_none(img_cv)
-      error("Not Found or unreadable image: $image_path")
+      error("Image not found/unreadable: $(image_path). Check path and permissions.")
     end
-    img_rgb = CellposeWrapper.cv2.cvtColor(img_cv, CellposeWrapper.cv2.COLOR_BGR2RGB)
-    return _cv_rgb_to_rgbmat(img_rgb)
+
+    try
+      img_rgb = CellposeWrapper.cv2.cvtColor(img_cv, CellposeWrapper.cv2.COLOR_BGR2RGB)
+      return _cv_rgb_to_rgbmat(img_rgb)
+    catch e
+      error("OpenCV failed to decode/convert image: $(image_path). Error: $(sprint(showerror, e))")
+    end
   finally
     unlock(CellposeWrapper._py_lock)
   end
