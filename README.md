@@ -64,7 +64,10 @@ Example using `venv`
 ```bash
 cd deps/python
 python3 -m venv .venv
+# If you are using UNIX-like OS:
 source .venv/bin/activate
+# If you are on Windows:
+.venv\Scripts\activate
 
 pip install cellpose torch opencv-python
 ```
