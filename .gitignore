@@ -10,8 +10,7 @@ deps/src/
 docs/build/
 docs/site/
 
-# NOTA: Rimosso Manifest.toml per garantire la riproducibilità esatta dell'ambiente
-# Manifest.toml <-- COMMENTATO/RIMOSSO
+Manifest.toml
 
 LocalPreferences.toml
 JuliaLocalPreferences.toml
