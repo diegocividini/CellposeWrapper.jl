@@ -379,7 +379,6 @@ function segment_image(image_path::AbstractString;
             flow_threshold=flow_threshold,
             cellprob_threshold=cellprob_threshold,
             augment=augment,
-            invert=invert,
             min_size=min_size
         )
 
