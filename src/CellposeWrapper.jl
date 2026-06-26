@@ -107,7 +107,7 @@ end
 # Inietta site-packages della venv se non è già in sys.path.
 # Questo è il fix fondamentale per Windows (PyCall può lanciare python con sys.path "di sistema").
 function _inject_sitepackages_if_missing!()
-    sys  = pyimport("sys")
+    sys = pyimport("sys")
     site = pyimport("site")
 
     pyexe = PyCall.python
@@ -324,6 +324,11 @@ function segment_image(image_path::AbstractString;
         end
 
         img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+
+        # Se invert=true, inverte i colori usando OpenCV direttamente in memoria Python
+        if invert
+            img_rgb = cv2.bitwise_not(img_rgb)
+        end
 
         use_gpu = false
         try
